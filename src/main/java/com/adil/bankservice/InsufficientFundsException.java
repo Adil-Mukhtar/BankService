@@ -1,4 +1,4 @@
-package BankService;
+package com.adil.bankservice;
 
 public class InsufficientFundsException extends RuntimeException {
     

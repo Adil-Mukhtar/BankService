@@ -1,4 +1,4 @@
-package BankService;
+package com.adil.bankservice;
 
 import java.math.BigDecimal;
 import java.util.concurrent.CountDownLatch;
