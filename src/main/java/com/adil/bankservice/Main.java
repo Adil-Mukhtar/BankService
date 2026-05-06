@@ -1,6 +1,7 @@
 package com.adil.bankservice;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,8 +22,9 @@ public class Main {
         int threadCount = 10;
 
         // Print success/failure counts at the end of every stress test
-        System.out.println(
-                "Press 1 to run the test with locks\nPress 3 to transfer to non-existing accounts");
+        System.out.println("Press 1 to run the test with locks");
+        System.out.println("Press 2 to run idempotency test (same transfer twice with same idempotency key)");
+        System.out.println("Press 3 to transfer to non-existing accounts");
         System.out.println("Press 4 to transfer negative amount");
         System.out.println("Press 5 to transfer to the same account");
         System.out.println("Press 6 to transfer more than the balance");
@@ -54,7 +56,8 @@ public class Main {
                             long toId = (long) (ThreadLocalRandom.current().nextInt(1, 6));
                             BigDecimal amount = new BigDecimal((int) (ThreadLocalRandom.current().nextInt(1, 51)));
                             try {
-                                bankService.transfer(fromId, toId, amount);
+                                String key = UUID.randomUUID().toString();
+                                bankService.transfer(key, fromId, toId, amount);
                                 success.incrementAndGet();
                             } catch (IllegalArgumentException | InsufficientFundsException e) {
                                 failure.incrementAndGet();
@@ -91,10 +94,58 @@ public class Main {
 
         }
 
+        else if (choice == 2) {
+
+            System.out.println("Testing idempotency...");
+
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch latch = new CountDownLatch(threadCount);
+
+            BigDecimal account1Before = bankService.getAccountBalance(1L);
+
+            String key = "test-key-12345";
+
+            for (int i = 0; i < threadCount; i++) {
+                executor.submit(() -> {
+                    try {
+                        // Same transfer with same idempotency key
+                        bankService.transfer(key, 1L, 2L, new BigDecimal("100.00"));
+                        // Second call with SAME key: should be idempotent
+                        bankService.transfer(key, 1L, 2L, new BigDecimal("100.00"));
+
+                        BigDecimal account1After = bankService.getAccountBalance(1L);
+                        BigDecimal expected = account1Before.subtract(new BigDecimal("100.00"));
+
+                        if (account1After.compareTo(expected) == 0) {
+                            System.out.println("PASS: Idempotency works. Account 1 lost only 100, not 200.");
+                        } else {
+                            System.out.println("FAIL: Account 1 lost " +
+                                    account1Before.subtract(account1After) + " — should be 100");
+                        }
+
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+
+            try {
+                latch.await(); // ← wait for all 10 threads to finish
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            executor.shutdown();
+
+            // Now safe to read audit log
+            System.out.println("\nAudit log size: " + bankService.getAuditLog().size());
+            bankService.getAuditLog().forEach(System.out::println);
+        }
+
         else if (choice == 3) {
             // Press 3 to transfer to non-existing accounts
             try {
-                bankService.transfer(1L, 999L, new BigDecimal("100.00"));
+                String key = UUID.randomUUID().toString();
+                bankService.transfer(key, 1L, 999L, new BigDecimal("100.00"));
             } catch (IllegalArgumentException e) {
                 System.out.println("Caught expected exception for non-existing accounts: " + e.getMessage());
             }
@@ -104,7 +155,8 @@ public class Main {
         else if (choice == 4) {
             // Press 4 to transfer negative amount
             try {
-                bankService.transfer(1L, 2L, new BigDecimal("-100.00"));
+                String key = UUID.randomUUID().toString();
+                bankService.transfer(key, 1L, 2L, new BigDecimal("-100.00"));
             } catch (IllegalArgumentException e) {
                 System.out.println("Caught expected exception for negative amount: " + e.getMessage());
             }
@@ -113,7 +165,8 @@ public class Main {
         else if (choice == 5) {
             // Press 5 to transfer to the same account
             try {
-                bankService.transfer(1L, 1L, new BigDecimal("100.00"));
+                String key = UUID.randomUUID().toString();
+                bankService.transfer(key, 1L, 1L, new BigDecimal("100.00"));
             } catch (IllegalArgumentException e) {
                 System.out.println("Caught expected exception for transferring to the same account: " + e.getMessage());
             }
@@ -122,7 +175,8 @@ public class Main {
         else if (choice == 6) {
             // Press 6 to transfer more than the balance
             try {
-                bankService.transfer(1L, 2L, new BigDecimal("2000.00"));
+                String key = UUID.randomUUID().toString();
+                bankService.transfer(key, 1L, 2L, new BigDecimal("2000.00"));
             } catch (InsufficientFundsException e) {
                 System.out.println("Caught expected exception for insufficient funds: " + e.getMessage());
             }
