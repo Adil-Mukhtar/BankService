@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class Account {
@@ -28,12 +29,23 @@ public class Account {
     }
 
     public BigDecimal getBalance() {
-        lock.lock();
+
+        try {
+            if (!lock.tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new ServiceUnavailableException(
+                        "Could not acquire lock on account " + id + " — system busy");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException(
+                    "Lock acquisition interrupted");
+        }
         try {
             return balance;
         } finally {
             lock.unlock();
         }
+
     }
 
     /**
@@ -43,7 +55,19 @@ public class Account {
      * @throws InsufficientFundsException if balance would go negative
      */
     void debit(BigDecimal amount) {
-        lock.lock();
+
+        try {
+            if (!lock.tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new ServiceUnavailableException(
+                        "Could not acquire lock on account " + id + " — system busy");
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException(
+                    "Locl acquisition interrupted");
+        }
+
         try {
             if (amount.compareTo(balance) > 0) {
                 throw new InsufficientFundsException(
@@ -54,6 +78,7 @@ public class Account {
         } finally {
             lock.unlock();
         }
+
     }
 
     /**
@@ -61,7 +86,17 @@ public class Account {
      * Acquires the account's lock for the duration of the operation.
      */
     void credit(BigDecimal amount) {
-        lock.lock();
+
+        try {
+            if (!lock.tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new ServiceUnavailableException(
+                        "Could not acquire lock on account " + id + " — system busy");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException(
+                    "Lock acquisition interrupted");
+        }
         try {
             balance = balance.add(amount);
             log.debug("Credit: accountId={} amount={} newBalance={}", id, amount, balance);
