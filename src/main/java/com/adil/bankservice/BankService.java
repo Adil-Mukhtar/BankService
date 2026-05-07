@@ -30,7 +30,7 @@ public class BankService {
     }
 
     private void validateAmount(BigDecimal amount) {
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount == null || amount.compareTo(BankConfig.MIN_AMOUNT) < 0) {
             throw new IllegalArgumentException("Amount must be positive");
         }
         if (amount.compareTo(BankConfig.MAX_TRANSFER_AMOUNT) > 0) {
@@ -117,6 +117,19 @@ public class BankService {
         return account.getBalance();
     }
 
+    private void acquireLockOrFail(Account account) {
+
+        try {
+            if (!account.getLock().tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new ServiceUnavailableException(
+                        "Could not acquire lock on account " + account.getId() + " — system busy");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException("Lock acquisition interrupted");
+        }
+    }
+
     /**
      * Transfers money atomically between two accounts.
      *
@@ -170,23 +183,9 @@ public class BankService {
             Account first = fromAccount.getId() < toAccount.getId() ? fromAccount : toAccount;
             Account second = first == fromAccount ? toAccount : fromAccount;
 
+            acquireLockOrFail(first);
             try {
-                if (!first.getLock().tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                    throw new ServiceUnavailableException("Lock timeout on account " + first.getId());
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ServiceUnavailableException("Lock acquisition interrupted");
-            }
-            try {
-                try {
-                    if (!second.getLock().tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                        throw new ServiceUnavailableException("Lock timeout on account " + second.getId());
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new ServiceUnavailableException("Lock acquisition interrupted");
-                }
+                acquireLockOrFail(second);
                 try {
                     // ... do the transfer
                     fromAccount.debit(amount); // may throw InsufficientFundsException

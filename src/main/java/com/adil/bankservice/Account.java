@@ -28,8 +28,8 @@ public class Account {
         return id;
     }
 
-    public BigDecimal getBalance() {
-
+    // Helper method to acquire lock with timeout and proper exception handling
+    private void acquireLockOrFail() {
         try {
             if (!lock.tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 throw new ServiceUnavailableException(
@@ -37,9 +37,13 @@ public class Account {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new ServiceUnavailableException(
-                    "Lock acquisition interrupted");
+            throw new ServiceUnavailableException("Lock acquisition interrupted");
         }
+    }
+
+    public BigDecimal getBalance() {
+
+        acquireLockOrFail();
         try {
             return balance;
         } finally {
@@ -56,17 +60,7 @@ public class Account {
      */
     void debit(BigDecimal amount) {
 
-        try {
-            if (!lock.tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                throw new ServiceUnavailableException(
-                        "Could not acquire lock on account " + id + " — system busy");
-            }
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ServiceUnavailableException(
-                    "Locl acquisition interrupted");
-        }
+        acquireLockOrFail();
 
         try {
             if (amount.compareTo(balance) > 0) {
@@ -87,16 +81,7 @@ public class Account {
      */
     void credit(BigDecimal amount) {
 
-        try {
-            if (!lock.tryLock(BankConfig.LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                throw new ServiceUnavailableException(
-                        "Could not acquire lock on account " + id + " — system busy");
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ServiceUnavailableException(
-                    "Lock acquisition interrupted");
-        }
+        acquireLockOrFail();
         try {
             balance = balance.add(amount);
             log.debug("Credit: accountId={} amount={} newBalance={}", id, amount, balance);
